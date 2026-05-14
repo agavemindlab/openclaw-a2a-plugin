@@ -44,10 +44,17 @@ export type A2AOutboundConfig = {
     getTaskPollInterval?: number;
 };
 
+export type A2AInboundAgentConfig = {
+    agentId: string;
+    agentCard?: A2AAgentCardConfig;
+    apiKeys?: A2AInboundKey[];
+};
+
 export type A2AInboundConfig = {
     agentCard?: A2AAgentCardConfig;
     allowUnauthenticated?: boolean;
     apiKeys?: A2AInboundKey[];
+    agents?: A2AInboundAgentConfig[];
 };
 
 export type A2APluginConfig = {
@@ -217,6 +224,34 @@ function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function parseInboundAgentConfig(value: unknown): A2AInboundAgentConfig | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+    const raw = value as Record<string, unknown>;
+    const agentId = typeof raw.agentId === "string" ? raw.agentId.trim() : "";
+    if (!agentId) {
+        return null;
+    }
+    const agentCard = parseAgentCard(raw.agentCard);
+    const apiKeys = parseApiKeys(raw.apiKeys);
+    return {
+        agentId,
+        ...(agentCard ? { agentCard } : {}),
+        ...(apiKeys ? { apiKeys } : {}),
+    };
+}
+
+function parseInboundAgents(value: unknown): A2AInboundAgentConfig[] | undefined {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const result = value
+        .map(parseInboundAgentConfig)
+        .filter((e): e is A2AInboundAgentConfig => e !== null);
+    return result.length > 0 ? result : undefined;
+}
+
 function parseInbound(value: unknown): A2AInboundConfig | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
@@ -226,14 +261,21 @@ function parseInbound(value: unknown): A2AInboundConfig | undefined {
     const allowUnauthenticated =
         typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
     const apiKeys = parseApiKeys(raw.apiKeys);
+    const agents = parseInboundAgents(raw.agents);
 
-    if (agentCard === undefined && allowUnauthenticated === undefined && apiKeys === undefined) {
+    if (
+        agentCard === undefined &&
+        allowUnauthenticated === undefined &&
+        apiKeys === undefined &&
+        agents === undefined
+    ) {
         return undefined;
     }
     return {
         ...(agentCard ? { agentCard } : {}),
         ...(allowUnauthenticated !== undefined ? { allowUnauthenticated } : {}),
         ...(apiKeys ? { apiKeys } : {}),
+        ...(agents ? { agents } : {}),
     };
 }
 

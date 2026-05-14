@@ -12,6 +12,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 import {
     type A2AAgentCardConfig,
+    type A2AInboundAgentConfig,
     type A2APluginConfig,
     buildRootConfigWithA2A,
     extractA2AEntry,
@@ -236,73 +237,7 @@ const a2aPlugin = definePluginEntry({
 
         // --- Inbound server ---
         const authConfig = resolveInboundAuth(pluginConfig, api.logger);
-        const authRequired = authConfig?.required ?? false;
-
-        // Lazy-initialized on first HTTP request (to determine public URL).
-        // Uses a Promise lock to prevent concurrent initialization.
-        let agentCard: AgentCard | null = null;
-        let httpHandlers: A2AHttpHandlers | null = null;
-        let initPromise: Promise<void> | null = null;
-        let livePluginConfig = { ...pluginConfig };
-
-        const initializeInbound = (publicUrl: string): Promise<void> => {
-            if (agentCard) {
-                return Promise.resolve();
-            }
-            if (initPromise) {
-                return initPromise;
-            }
-            initPromise = Promise.resolve()
-                .then(() => {
-                    if (agentCard) {
-                        return;
-                    }
-
-                    agentCard = new AgentCardBuilder({
-                        openclawConfig: api.config,
-                        pluginConfig: livePluginConfig,
-                        publicUrl,
-                        authRequired,
-                    }).build();
-
-                    const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
-                    const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
-                    const executor = new OpenClawExecutor({
-                        agentId: "main",
-                        runtime: api.runtime,
-                        config: api.config,
-                        fileStore,
-                        workspaceDir,
-                    });
-
-                    const requestHandler = new DefaultRequestHandler(
-                        agentCard,
-                        taskStore,
-                        executor,
-                    );
-                    httpHandlers = new A2AHttpHandlers({
-                        agentCard,
-                        getAgentCard: (req) =>
-                            new AgentCardBuilder({
-                                openclawConfig: api.config,
-                                pluginConfig: livePluginConfig,
-                                publicUrl: resolveRequestPublicUrl(req),
-                                authRequired,
-                            }).build(),
-                        requestHandler,
-                        auth: authConfig,
-                    });
-
-                    api.logger.info(
-                        `[a2a] Inbound server initialized: ${agentCard.name} at ${publicUrl}`,
-                    );
-                })
-                .catch((err) => {
-                    initPromise = null;
-                    throw err;
-                });
-            return initPromise;
-        };
+        const inboundAgents = pluginConfig.inbound?.agents;
 
         function resolveRequestPublicUrl(req: import("node:http").IncomingMessage): string {
             const forwardedHost = req.headers["x-forwarded-host"];
@@ -320,91 +255,263 @@ const a2aPlugin = definePluginEntry({
             return `${protocol}://${host}`;
         }
 
-        api.registerHttpRoute({
-            path: "/.well-known/agent-card.json",
-            auth: "plugin",
-            handler: async (req, res) => {
-                if (!httpHandlers) {
-                    await initializeInbound(resolveRequestPublicUrl(req));
-                }
-                if (httpHandlers) {
-                    await httpHandlers.handleAgentCard(req, res);
-                }
-            },
-        });
+        if (inboundAgents && inboundAgents.length > 0) {
+            // --- Multi-agent inbound: one /a2a/<agentId> endpoint per agent ---
+            const stopCallbacks: Array<() => void> = [];
 
-        api.registerHttpRoute({
-            path: "/a2a",
-            auth: "plugin",
-            handler: async (req, res) => {
-                if (!httpHandlers) {
-                    await initializeInbound(resolveRequestPublicUrl(req));
-                }
-                if (httpHandlers) {
-                    await httpHandlers.handleJsonRpc(req, res);
-                }
-            },
-        });
+            for (const agentEntry of inboundAgents) {
+                const agentId = agentEntry.agentId;
+                const agentAuth: A2AAuthConfig | undefined = (() => {
+                    if (pluginConfig.inbound?.allowUnauthenticated) return undefined;
+                    const keys = agentEntry.apiKeys ?? pluginConfig.inbound?.apiKeys ?? [];
+                    if (keys.length > 0) return { required: true, validKeys: keys };
+                    api.logger.warn(
+                        `[a2a] No API keys for agent "${agentId}" — /a2a/${agentId} will reject all requests`,
+                    );
+                    return { required: true, validKeys: [] };
+                })();
+                const agentAuthRequired = agentAuth?.required ?? false;
 
-        // --- Update agent card tool (only when inbound is accepting requests) ---
-        const inboundConfigured =
-            pluginConfig.inbound?.allowUnauthenticated === true ||
-            (pluginConfig.inbound?.apiKeys && pluginConfig.inbound.apiKeys.length > 0);
+                let agentCard: AgentCard | null = null;
+                let handlers: A2AHttpHandlers | null = null;
+                let initPromise: Promise<void> | null = null;
 
-        if (inboundConfigured) {
-            api.registerTool(
-                createUpdateAgentCardTool({
-                    loadConfig: async () =>
-                        api.runtime.config.loadConfig() as Record<string, unknown>,
-                    writeConfigFile: (cfg) =>
-                        api.runtime.config.writeConfigFile(
-                            cfg as import("openclaw/plugin-sdk").OpenClawConfig,
-                        ),
-                    updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => {
-                        if (!agentCard) {
-                            return;
-                        }
-                        livePluginConfig = {
-                            ...livePluginConfig,
-                            inbound: {
-                                ...livePluginConfig.inbound,
-                                agentCard: {
-                                    ...livePluginConfig.inbound?.agentCard,
-                                    ...patch,
-                                },
-                            },
-                        };
-                        const rebuilt = new AgentCardBuilder({
+                // Capture per-agent entry for use inside closures
+                const entry: A2AInboundAgentConfig = agentEntry;
+
+                const initAgent = (publicUrl: string): Promise<void> => {
+                    if (agentCard) return Promise.resolve();
+                    if (initPromise) return initPromise;
+                    initPromise = Promise.resolve()
+                        .then(() => {
+                            if (agentCard) return;
+                            agentCard = new AgentCardBuilder({
+                                openclawConfig: api.config,
+                                pluginConfig,
+                                publicUrl,
+                                authRequired: agentAuthRequired,
+                                agentId,
+                                agentCardOverride: entry.agentCard,
+                                a2aPath: `/a2a/${agentId}`,
+                            }).build();
+                            const taskStore = new JSONTaskStore(
+                                `${stateDir}/a2a/${agentId}/tasks`,
+                            );
+                            const fileStore = new LocalFileStore(
+                                `${workspaceDir}/a2a/${agentId}/files`,
+                            );
+                            const executor = new OpenClawExecutor({
+                                agentId,
+                                runtime: api.runtime,
+                                config: api.config,
+                                fileStore,
+                                workspaceDir,
+                            });
+                            const requestHandler = new DefaultRequestHandler(
+                                agentCard,
+                                taskStore,
+                                executor,
+                            );
+                            handlers = new A2AHttpHandlers({
+                                agentCard,
+                                getAgentCard: (req) =>
+                                    new AgentCardBuilder({
+                                        openclawConfig: api.config,
+                                        pluginConfig,
+                                        publicUrl: resolveRequestPublicUrl(req),
+                                        authRequired: agentAuthRequired,
+                                        agentId,
+                                        agentCardOverride: entry.agentCard,
+                                        a2aPath: `/a2a/${agentId}`,
+                                    }).build(),
+                                requestHandler,
+                                auth: agentAuth,
+                            });
+                            api.logger.info(
+                                `[a2a] Agent "${agentId}" initialized at ${publicUrl}/a2a/${agentId}`,
+                            );
+                        })
+                        .catch((err) => {
+                            initPromise = null;
+                            throw err;
+                        });
+                    return initPromise;
+                };
+
+                stopCallbacks.push(() => {
+                    agentCard = null;
+                    handlers = null;
+                    initPromise = null;
+                });
+
+                api.registerHttpRoute({
+                    path: `/.well-known/agent-card-${agentId}.json`,
+                    auth: "plugin",
+                    handler: async (req, res) => {
+                        if (!handlers) await initAgent(resolveRequestPublicUrl(req));
+                        if (handlers) await (handlers as A2AHttpHandlers).handleAgentCard(req, res);
+                    },
+                });
+
+                api.registerHttpRoute({
+                    path: `/a2a/${agentId}`,
+                    auth: "plugin",
+                    handler: async (req, res) => {
+                        if (!handlers) await initAgent(resolveRequestPublicUrl(req));
+                        if (handlers) await (handlers as A2AHttpHandlers).handleJsonRpc(req, res);
+                    },
+                });
+            }
+
+            api.logger.info(
+                `[a2a] Multi-agent inbound registered: ${inboundAgents.map((a) => a.agentId).join(", ")}`,
+            );
+
+            api.registerReload({
+                noopPrefixes: inboundAgents.map(
+                    (a) => `plugins.entries.a2a.config.inbound.agents`,
+                ),
+            });
+
+            api.registerService({
+                id: "a2a",
+                start: async () => { api.logger.info("[a2a] A2A service started"); },
+                stop: async () => {
+                    api.logger.info("[a2a] A2A service stopped");
+                    for (const cb of stopCallbacks) cb();
+                },
+            });
+        } else {
+            // --- Single-agent inbound (backward compat): /a2a ---
+            const authRequired = authConfig?.required ?? false;
+
+            let agentCard: AgentCard | null = null;
+            let httpHandlers: A2AHttpHandlers | null = null;
+            let initPromise: Promise<void> | null = null;
+            let livePluginConfig = { ...pluginConfig };
+
+            const initializeInbound = (publicUrl: string): Promise<void> => {
+                if (agentCard) return Promise.resolve();
+                if (initPromise) return initPromise;
+                initPromise = Promise.resolve()
+                    .then(() => {
+                        if (agentCard) return;
+                        agentCard = new AgentCardBuilder({
                             openclawConfig: api.config,
                             pluginConfig: livePluginConfig,
-                            publicUrl: agentCard.url.replace(/\/a2a$/, ""),
+                            publicUrl,
                             authRequired,
                         }).build();
-                        Object.assign(agentCard, rebuilt);
-                    },
-                }),
-            );
+                        const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
+                        const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
+                        const executor = new OpenClawExecutor({
+                            agentId: "main",
+                            runtime: api.runtime,
+                            config: api.config,
+                            fileStore,
+                            workspaceDir,
+                        });
+                        const requestHandler = new DefaultRequestHandler(
+                            agentCard,
+                            taskStore,
+                            executor,
+                        );
+                        httpHandlers = new A2AHttpHandlers({
+                            agentCard,
+                            getAgentCard: (req) =>
+                                new AgentCardBuilder({
+                                    openclawConfig: api.config,
+                                    pluginConfig: livePluginConfig,
+                                    publicUrl: resolveRequestPublicUrl(req),
+                                    authRequired,
+                                }).build(),
+                            requestHandler,
+                            auth: authConfig,
+                        });
+                        api.logger.info(
+                            `[a2a] Inbound server initialized: ${agentCard.name} at ${publicUrl}`,
+                        );
+                    })
+                    .catch((err) => {
+                        initPromise = null;
+                        throw err;
+                    });
+                return initPromise;
+            };
+
+            api.registerHttpRoute({
+                path: "/.well-known/agent-card.json",
+                auth: "plugin",
+                handler: async (req, res) => {
+                    if (!httpHandlers) await initializeInbound(resolveRequestPublicUrl(req));
+                    if (httpHandlers) await httpHandlers.handleAgentCard(req, res);
+                },
+            });
+
+            api.registerHttpRoute({
+                path: "/a2a",
+                auth: "plugin",
+                handler: async (req, res) => {
+                    if (!httpHandlers) await initializeInbound(resolveRequestPublicUrl(req));
+                    if (httpHandlers) await httpHandlers.handleJsonRpc(req, res);
+                },
+            });
+
+            // --- Update agent card tool ---
+            const inboundConfigured =
+                pluginConfig.inbound?.allowUnauthenticated === true ||
+                (pluginConfig.inbound?.apiKeys && pluginConfig.inbound.apiKeys.length > 0);
+
+            if (inboundConfigured) {
+                api.registerTool(
+                    createUpdateAgentCardTool({
+                        loadConfig: async () =>
+                            api.runtime.config.loadConfig() as Record<string, unknown>,
+                        writeConfigFile: (cfg) =>
+                            api.runtime.config.writeConfigFile(
+                                cfg as import("openclaw/plugin-sdk").OpenClawConfig,
+                            ),
+                        updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => {
+                            if (!agentCard) return;
+                            livePluginConfig = {
+                                ...livePluginConfig,
+                                inbound: {
+                                    ...livePluginConfig.inbound,
+                                    agentCard: {
+                                        ...livePluginConfig.inbound?.agentCard,
+                                        ...patch,
+                                    },
+                                },
+                            };
+                            const rebuilt = new AgentCardBuilder({
+                                openclawConfig: api.config,
+                                pluginConfig: livePluginConfig,
+                                publicUrl: agentCard.url.replace(/\/a2a$/, ""),
+                                authRequired,
+                            }).build();
+                            Object.assign(agentCard, rebuilt);
+                        },
+                    }),
+                );
+            }
+
+            api.registerReload({
+                noopPrefixes: ["plugins.entries.a2a.config.inbound.agentCard"],
+            });
+
+            api.registerService({
+                id: "a2a",
+                start: async () => { api.logger.info("[a2a] A2A service started"); },
+                stop: async () => {
+                    api.logger.info("[a2a] A2A service stopped");
+                    agentCard = null;
+                    httpHandlers = null;
+                    initPromise = null;
+                },
+            });
         }
 
-        api.registerReload({
-            noopPrefixes: ["plugins.entries.a2a.config.inbound.agentCard"],
-        });
-
         registerCli(api, pluginConfig);
-
-        // --- Lifecycle service ---
-        api.registerService({
-            id: "a2a",
-            start: async () => {
-                api.logger.info("[a2a] A2A service started");
-            },
-            stop: async () => {
-                api.logger.info("[a2a] A2A service stopped");
-                agentCard = null;
-                httpHandlers = null;
-                initPromise = null;
-            },
-        });
 
         api.logger.info("[a2a] Plugin registered successfully");
     },

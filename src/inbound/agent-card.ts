@@ -13,6 +13,8 @@ export type BuildAgentCardParams = {
     publicUrl: string;
     authRequired?: boolean;
     agentId?: string;
+    agentCardOverride?: A2AAgentCardConfig;
+    a2aPath?: string;
 };
 
 export class AgentCardBuilder {
@@ -21,7 +23,7 @@ export class AgentCardBuilder {
 
     constructor(private readonly params: BuildAgentCardParams) {
         this.agentId = params.agentId ?? "main";
-        this.agentCardConfig = params.pluginConfig.inbound?.agentCard;
+        this.agentCardConfig = params.agentCardOverride ?? params.pluginConfig.inbound?.agentCard;
     }
 
     build(): AgentCard {
@@ -31,13 +33,14 @@ export class AgentCardBuilder {
             `OpenClaw Agent (${this.agentId})`;
         const description = this.agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
         const baseUrl = this.params.publicUrl.replace(/\/$/, "");
+        const a2aPath = this.params.a2aPath ?? "/a2a";
 
         const card: AgentCard = {
             name,
             description,
             protocolVersion: "0.3.0",
             version: "1.0.0",
-            url: `${baseUrl}/a2a`,
+            url: `${baseUrl}${a2aPath}`,
             capabilities: {
                 streaming: true,
                 pushNotifications: false,
