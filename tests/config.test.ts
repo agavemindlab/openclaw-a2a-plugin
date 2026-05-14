@@ -162,6 +162,52 @@ describe("parseA2APluginConfig", () => {
         ]);
     });
 
+    test("parses inbound agents array", () => {
+        const result = parseA2APluginConfig({
+            inbound: {
+                agents: [
+                    {
+                        agentId: "swe",
+                        agentCard: { name: "SWE Agent", description: "Software engineer" },
+                        apiKeys: [{ label: "caller-to-swe", key: "secret1" }],
+                    },
+                    {
+                        agentId: "pmo",
+                        agentCard: { name: "PMO Agent" },
+                    },
+                ],
+            },
+        });
+        expect(result.inbound?.agents).toHaveLength(2);
+        expect(result.inbound?.agents?.[0]).toEqual({
+            agentId: "swe",
+            agentCard: { name: "SWE Agent", description: "Software engineer" },
+            apiKeys: [{ label: "caller-to-swe", key: "secret1" }],
+        });
+        expect(result.inbound?.agents?.[1]).toEqual({
+            agentId: "pmo",
+            agentCard: { name: "PMO Agent" },
+        });
+    });
+
+    test("skips agents with missing or empty agentId", () => {
+        const result = parseA2APluginConfig({
+            inbound: {
+                agents: [{ agentId: "valid" }, { agentId: "" }, { agentId: "  " }, "not-an-object"],
+                allowUnauthenticated: true,
+            },
+        });
+        expect(result.inbound?.agents).toHaveLength(1);
+        expect(result.inbound?.agents?.[0]?.agentId).toBe("valid");
+    });
+
+    test("returns undefined agents for non-array value", () => {
+        const result = parseA2APluginConfig({
+            inbound: { agents: "not-an-array", allowUnauthenticated: true },
+        });
+        expect(result.inbound?.agents).toBeUndefined();
+    });
+
     test("parses inbound auth config", () => {
         const result = parseA2APluginConfig({
             inbound: {

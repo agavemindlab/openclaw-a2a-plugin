@@ -368,9 +368,7 @@ const a2aPlugin = definePluginEntry({
             );
 
             api.registerReload({
-                noopPrefixes: inboundAgents.map(
-                    (a) => `plugins.entries.a2a.config.inbound.agents`,
-                ),
+                noopPrefixes: ["plugins.entries.a2a.config.inbound.agents"],
             });
 
             api.registerService({

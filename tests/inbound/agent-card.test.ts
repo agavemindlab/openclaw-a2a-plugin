@@ -76,6 +76,36 @@ describe("AgentCardBuilder", () => {
         expect(card.url).toBe("https://example.com/a2a");
     });
 
+    test("uses custom a2aPath for endpoint URL", () => {
+        const card = new AgentCardBuilder({
+            ...baseParams,
+            agentId: "swe",
+            a2aPath: "/a2a/swe",
+        }).build();
+        expect(card.url).toBe("https://example.com/a2a/swe");
+    });
+
+    test("agentCardOverride takes priority over pluginConfig.inbound.agentCard", () => {
+        const card = new AgentCardBuilder({
+            ...baseParams,
+            pluginConfig: { inbound: { agentCard: { name: "Global Name", description: "Global desc" } } },
+            agentCardOverride: { name: "Override Name", description: "Override desc" },
+        }).build();
+        expect(card.name).toBe("Override Name");
+        expect(card.description).toBe("Override desc");
+    });
+
+    test("agentCardOverride skills are used for the card", () => {
+        const card = new AgentCardBuilder({
+            ...baseParams,
+            agentCardOverride: {
+                skills: [{ id: "review", name: "Review", description: "Code review" }],
+            },
+        }).build();
+        expect(card.skills).toHaveLength(1);
+        expect(card.skills[0].id).toBe("review");
+    });
+
     test("sets protocol version and capabilities", () => {
         const card = new AgentCardBuilder(baseParams).build();
         expect(card.protocolVersion).toBe("0.3.0");

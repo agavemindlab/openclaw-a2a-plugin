@@ -261,6 +261,66 @@ endpoint. Follow the steps below to make your agent reachable.
 | `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
 | `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
 
+#### Multi-Agent Inbound (Multiple Agents on One Gateway)
+
+If your gateway hosts more than one agent, use `inbound.agents` instead of `inbound.agentCard`. Each entry gets its own dedicated A2A endpoint (`/a2a/<agentId>`) and Agent Card (`/.well-known/agent-card-<agentId>.json`), so remote peers can address individual agents directly.
+
+```json
+{
+    "plugins": {
+        "entries": {
+            "a2a": {
+                "enabled": true,
+                "config": {
+                    "inbound": {
+                        "agents": [
+                            {
+                                "agentId": "swe",
+                                "agentCard": {
+                                    "name": "SWE Agent",
+                                    "description": "Software Engineering AI Coworker",
+                                    "skills": [{ "id": "code-review", "name": "Code Review", "description": "Review and improve code" }]
+                                },
+                                "apiKeys": [{ "label": "caller-to-swe", "key": "<secret>" }]
+                            },
+                            {
+                                "agentId": "pmo",
+                                "agentCard": {
+                                    "name": "PMO Agent",
+                                    "description": "Project Management AI Coworker"
+                                },
+                                "apiKeys": [{ "label": "caller-to-pmo", "key": "<secret>" }]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+| Field per entry          | Type      | Default | Description                                                                         |
+| ------------------------ | --------- | ------- | ----------------------------------------------------------------------------------- |
+| `agentId`                | `string`  | —       | **Required.** Must match the agent's `id` in OpenClaw config.                       |
+| `agentCard`              | `object`  | —       | Agent Card metadata (`name`, `description`, `skills`). Falls back to identity name. |
+| `apiKeys`                | `array`   | —       | Per-agent `{ label, key }` auth keys. Falls back to shared `inbound.apiKeys`.       |
+
+The outbound config on the **calling** gateway maps each agent to its per-agent URL:
+
+```json
+{
+    "outbound": {
+        "agents": {
+            "swe": { "url": "https://peer-host/a2a/swe", "custom_headers": { "Authorization": "Bearer <secret>" } },
+            "pmo": { "url": "https://peer-host/a2a/pmo", "custom_headers": { "Authorization": "Bearer <secret>" } }
+        }
+    }
+}
+```
+
+> **Note:** `inbound.agentCard` (single-agent mode) and `inbound.agents` (multi-agent mode) are mutually exclusive. When `inbound.agents` is present, `inbound.agentCard` is ignored and the `/a2a` catch-all route is not registered.
+
 #### 2. Restart the Gateway
 
 The plugin registers its HTTP endpoints on startup, so a restart is required:

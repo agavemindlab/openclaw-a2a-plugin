@@ -256,6 +256,78 @@ describe("plugin registration", () => {
     });
 });
 
+describe("multi-agent inbound registration", () => {
+    function createApiWithRoutes(options?: Parameters<typeof createApi>[0]) {
+        const ctx = createApi(options);
+        const routes: Array<{ path: string }> = [];
+        const services: Array<{ id: string }> = [];
+        ctx.api.registerHttpRoute = (route: { path: string }) => {
+            routes.push(route);
+        };
+        ctx.api.registerService = (service: { id: string }) => {
+            services.push(service);
+        };
+        return { ...ctx, routes, services };
+    }
+
+    test("registers per-agent /a2a/<agentId> routes for inbound.agents", () => {
+        const { api, routes } = createApiWithRoutes({
+            pluginConfig: {
+                inbound: {
+                    allowUnauthenticated: true,
+                    agents: [{ agentId: "swe" }, { agentId: "pmo" }, { agentId: "ga" }],
+                },
+            },
+        });
+        plugin.register(api as never);
+        const paths = routes.map((r) => r.path);
+        expect(paths).toContain("/a2a/swe");
+        expect(paths).toContain("/.well-known/agent-card-swe.json");
+        expect(paths).toContain("/a2a/pmo");
+        expect(paths).toContain("/.well-known/agent-card-pmo.json");
+        expect(paths).toContain("/a2a/ga");
+        expect(paths).toContain("/.well-known/agent-card-ga.json");
+        expect(paths).not.toContain("/a2a");
+        expect(paths).not.toContain("/.well-known/agent-card.json");
+    });
+
+    test("single-agent mode still registers /a2a (backward compat)", () => {
+        const { api, routes } = createApiWithRoutes({
+            pluginConfig: { inbound: { allowUnauthenticated: true } },
+        });
+        plugin.register(api as never);
+        const paths = routes.map((r) => r.path);
+        expect(paths).toContain("/a2a");
+        expect(paths).toContain("/.well-known/agent-card.json");
+        expect(paths).not.toContain("/a2a/swe");
+    });
+
+    test("multi-agent mode noopPrefixes reference inbound.agents", () => {
+        const { api, reloadRegistrations } = createApiWithRoutes({
+            pluginConfig: {
+                inbound: {
+                    allowUnauthenticated: true,
+                    agents: [{ agentId: "swe" }],
+                },
+            },
+        });
+        plugin.register(api as never);
+        expect(reloadRegistrations[0]?.noopPrefixes).toContain(
+            "plugins.entries.a2a.config.inbound.agents",
+        );
+    });
+
+    test("single-agent mode noopPrefixes reference inbound.agentCard", () => {
+        const { api, reloadRegistrations } = createApiWithRoutes({
+            pluginConfig: { inbound: { allowUnauthenticated: true } },
+        });
+        plugin.register(api as never);
+        expect(reloadRegistrations[0]?.noopPrefixes).toContain(
+            "plugins.entries.a2a.config.inbound.agentCard",
+        );
+    });
+});
+
 describe("OpenClaw registration mode compatibility", () => {
     test("cli-metadata mode registers CLI without accessing runtime", () => {
         const { api, cliRegistrations, tools } = createApi({
