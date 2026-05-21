@@ -238,7 +238,7 @@ const a2aPlugin = definePluginEntry({
             agents && Object.keys(agents).length > 0
                 ? createOutboundTools({
                       agents,
-                      stateDir: localAgentId ? `${stateDir}/a2a/local/${localAgentId}` : (stateDir ?? workspaceDir),
+                      stateDir: localAgentId ? `${stateDir ?? workspaceDir}/a2a/local/${localAgentId}` : (stateDir ?? workspaceDir),
                       workspaceDir: toolContext?.workspaceDir ?? workspaceDir,
                       taskStore: outbound?.taskStore,
                       fileStore: outbound?.fileStore,
