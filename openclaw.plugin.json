@@ -20,6 +20,14 @@
         "inbound.apiKeys": {
             "label": "API Keys",
             "help": "Authentication keys for incoming A2A requests"
+        },
+        "inbound.agents": {
+            "label": "Inbound Agents",
+            "help": "Per-agent inbound A2A endpoints and Agent Cards."
+        },
+        "outbound.localAgents": {
+            "label": "Local Agent Outbound Routes",
+            "help": "Per-local-agent remote A2A routes and authentication."
         }
     },
     "configSchema": {
@@ -34,26 +42,80 @@
                         "type": "object",
                         "additionalProperties": {
                             "type": "object",
-                            "required": ["url"],
+                            "required": [
+                                "url"
+                            ],
                             "additionalProperties": false,
                             "properties": {
-                                "url": { "type": "string" },
+                                "url": {
+                                    "type": "string"
+                                },
                                 "custom_headers": {
                                     "type": "object",
-                                    "additionalProperties": { "type": "string" }
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    }
                                 }
                             }
                         }
                     },
-                    "taskStore": { "type": "boolean" },
-                    "fileStore": { "type": "boolean" },
-                    "sendMessageCharacterLimit": { "type": "number" },
-                    "minimizedObjectStringLength": { "type": "number" },
-                    "viewArtifactCharacterLimit": { "type": "number" },
-                    "agentCardTimeout": { "type": "number" },
-                    "sendMessageTimeout": { "type": "number" },
-                    "getTaskTimeout": { "type": "number" },
-                    "getTaskPollInterval": { "type": "number" }
+                    "taskStore": {
+                        "type": "boolean"
+                    },
+                    "fileStore": {
+                        "type": "boolean"
+                    },
+                    "sendMessageCharacterLimit": {
+                        "type": "number"
+                    },
+                    "minimizedObjectStringLength": {
+                        "type": "number"
+                    },
+                    "viewArtifactCharacterLimit": {
+                        "type": "number"
+                    },
+                    "agentCardTimeout": {
+                        "type": "number"
+                    },
+                    "sendMessageTimeout": {
+                        "type": "number"
+                    },
+                    "getTaskTimeout": {
+                        "type": "number"
+                    },
+                    "getTaskPollInterval": {
+                        "type": "number"
+                    },
+                    "localAgents": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "agents": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "required": [
+                                            "url"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "url": {
+                                                "type": "string"
+                                            },
+                                            "custom_headers": {
+                                                "type": "object",
+                                                "additionalProperties": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             },
             "inbound": {
@@ -64,51 +126,192 @@
                         "type": "object",
                         "additionalProperties": false,
                         "properties": {
-                            "name": { "type": "string" },
-                            "description": { "type": "string" },
+                            "name": {
+                                "type": "string"
+                            },
+                            "description": {
+                                "type": "string"
+                            },
                             "skills": {
                                 "type": "array",
                                 "items": {
                                     "type": "object",
-                                    "required": ["id", "name", "description"],
+                                    "required": [
+                                        "id",
+                                        "name",
+                                        "description"
+                                    ],
                                     "additionalProperties": false,
                                     "properties": {
-                                        "id": { "type": "string" },
-                                        "name": { "type": "string" },
-                                        "description": { "type": "string" },
-                                        "tags": { "type": "array", "items": { "type": "string" } },
+                                        "id": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "description": {
+                                            "type": "string"
+                                        },
+                                        "tags": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
                                         "examples": {
                                             "type": "array",
-                                            "items": { "type": "string" }
+                                            "items": {
+                                                "type": "string"
+                                            }
                                         },
                                         "inputModes": {
                                             "type": "array",
-                                            "items": { "type": "string" }
+                                            "items": {
+                                                "type": "string"
+                                            }
                                         },
                                         "outputModes": {
                                             "type": "array",
-                                            "items": { "type": "string" }
+                                            "items": {
+                                                "type": "string"
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     },
-                    "allowUnauthenticated": { "type": "boolean" },
+                    "allowUnauthenticated": {
+                        "type": "boolean"
+                    },
                     "apiKeys": {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "required": ["label", "key"],
+                            "required": [
+                                "label",
+                                "key"
+                            ],
                             "additionalProperties": false,
                             "properties": {
-                                "label": { "type": "string" },
-                                "key": { "type": "string" }
+                                "label": {
+                                    "type": "string"
+                                },
+                                "key": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "agents": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": [
+                                "agentId"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "agentId": {
+                                    "type": "string"
+                                },
+                                "agentCard": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "description": {
+                                            "type": "string"
+                                        },
+                                        "skills": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "required": [
+                                                    "id",
+                                                    "name",
+                                                    "description"
+                                                ],
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "string"
+                                                    },
+                                                    "name": {
+                                                        "type": "string"
+                                                    },
+                                                    "description": {
+                                                        "type": "string"
+                                                    },
+                                                    "tags": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "examples": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "inputModes": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "outputModes": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "apiKeys": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": [
+                                            "label",
+                                            "key"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "label": {
+                                                "type": "string"
+                                            },
+                                            "key": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    },
+    "contracts": {
+        "tools": [
+            "a2a_get_agent",
+            "a2a_get_agents",
+            "a2a_get_task",
+            "a2a_send_message",
+            "a2a_update_agent_card",
+            "a2a_view_data_artifact",
+            "a2a_view_text_artifact"
+        ]
+    },
+    "activation": {
+        "onStartup": true
     }
 }
