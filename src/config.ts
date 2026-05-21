@@ -20,6 +20,10 @@ export type A2AAgentEntry = {
     custom_headers?: Record<string, string>;
 };
 
+export type A2ALocalAgentOutboundConfig = {
+    agents?: Record<string, A2AAgentEntry>;
+};
+
 export type A2AInboundKey = {
     label: string;
     key: string;
@@ -33,6 +37,7 @@ export type A2AAgentCardConfig = {
 
 export type A2AOutboundConfig = {
     agents?: Record<string, A2AAgentEntry>;
+    localAgents?: Record<string, A2ALocalAgentOutboundConfig>;
     taskStore?: boolean;
     fileStore?: boolean;
     sendMessageCharacterLimit?: number;
@@ -146,6 +151,27 @@ function parseAgents(value: unknown): Record<string, A2AAgentEntry> | undefined 
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function parseLocalAgents(
+    value: unknown,
+): Record<string, A2ALocalAgentOutboundConfig> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = value as Record<string, unknown>;
+    const result: Record<string, A2ALocalAgentOutboundConfig> = {};
+    for (const [id, entry] of Object.entries(raw)) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            continue;
+        }
+        const e = entry as Record<string, unknown>;
+        const agents = parseAgents(e.agents);
+        if (agents) {
+            result[id] = { agents };
+        }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function parsePositiveNumber(value: unknown): number | undefined {
     return typeof value === "number" && value > 0 ? value : undefined;
 }
@@ -196,6 +222,7 @@ function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
     }
     const raw = value as Record<string, unknown>;
     const agents = parseAgents(raw.agents);
+    const localAgents = parseLocalAgents(raw.localAgents);
     const taskStore = typeof raw.taskStore === "boolean" ? raw.taskStore : undefined;
     const fileStore = typeof raw.fileStore === "boolean" ? raw.fileStore : undefined;
     const sendMessageCharacterLimit = parsePositiveNumber(raw.sendMessageCharacterLimit);
@@ -208,6 +235,7 @@ function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
 
     const result: A2AOutboundConfig = {};
     if (agents) result.agents = agents;
+    if (localAgents) result.localAgents = localAgents;
     if (taskStore !== undefined) result.taskStore = taskStore;
     if (fileStore !== undefined) result.fileStore = fileStore;
     if (sendMessageCharacterLimit !== undefined)

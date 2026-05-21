@@ -57,6 +57,28 @@ function resolveInboundAuth(
     return { required: true, validKeys: [] };
 }
 
+type A2ALocalToolContext = {
+    agentId?: string;
+    workspaceDir?: string;
+};
+
+const A2A_OUTBOUND_TOOL_NAMES = [
+    "a2a_get_agents",
+    "a2a_get_agent",
+    "a2a_send_message",
+    "a2a_get_task",
+    "a2a_view_text_artifact",
+    "a2a_view_data_artifact",
+];
+
+function registerCompatTool(
+    api: OpenClawPluginApi,
+    tool: unknown,
+    opts?: Parameters<OpenClawPluginApi["registerTool"]>[1],
+): void {
+    api.registerTool(tool as Parameters<OpenClawPluginApi["registerTool"]>[0], opts);
+}
+
 function registerCli(api: OpenClawPluginApi, pluginConfig: A2APluginConfig): void {
     api.registerCli(
         ({ program }) => {
@@ -202,37 +224,62 @@ const a2aPlugin = definePluginEntry({
     register(api: OpenClawPluginApi) {
         const pluginConfig = parseA2APluginConfig(api.pluginConfig);
 
-        if (api.registrationMode !== "full") {
-            registerCli(api, pluginConfig);
-            return;
-        }
-
-        const stateDir = api.runtime.state.resolveStateDir();
+        const stateDir = (() => { try { return api.runtime.state.resolveStateDir(); } catch { return undefined; } })();
         const workspaceDir = api.config.agents?.defaults?.workspace ?? process.cwd();
 
         // --- Outbound tools (via @a2anet/a2a-utils) ---
+        // Register in all modes so tool-discovery can expose them to sessions.
         const outbound = pluginConfig.outbound;
-        if (outbound?.agents && Object.keys(outbound.agents).length > 0) {
-            const tools = createOutboundTools({
-                agents: outbound.agents,
-                stateDir,
-                workspaceDir,
-                taskStore: outbound.taskStore,
-                fileStore: outbound.fileStore,
-                agentCardTimeout: outbound.agentCardTimeout,
-                sendMessageTimeout: outbound.sendMessageTimeout,
-                getTaskTimeout: outbound.getTaskTimeout,
-                getTaskPollInterval: outbound.getTaskPollInterval,
-                sendMessageCharacterLimit: outbound.sendMessageCharacterLimit,
-                minimizedObjectStringLength: outbound.minimizedObjectStringLength,
-                viewArtifactCharacterLimit: outbound.viewArtifactCharacterLimit,
-            });
-            for (const tool of tools) {
-                api.registerTool(tool);
+        const createToolsForAgents = (
+            agents: NonNullable<A2APluginConfig["outbound"]>["agents"],
+            localAgentId?: string,
+            toolContext?: A2ALocalToolContext,
+        ) =>
+            agents && Object.keys(agents).length > 0
+                ? createOutboundTools({
+                      agents,
+                      stateDir: localAgentId ? `${stateDir}/a2a/local/${localAgentId}` : (stateDir ?? workspaceDir),
+                      workspaceDir: toolContext?.workspaceDir ?? workspaceDir,
+                      taskStore: outbound?.taskStore,
+                      fileStore: outbound?.fileStore,
+                      agentCardTimeout: outbound?.agentCardTimeout,
+                      sendMessageTimeout: outbound?.sendMessageTimeout,
+                      getTaskTimeout: outbound?.getTaskTimeout,
+                      getTaskPollInterval: outbound?.getTaskPollInterval,
+                      sendMessageCharacterLimit: outbound?.sendMessageCharacterLimit,
+                      minimizedObjectStringLength: outbound?.minimizedObjectStringLength,
+                      viewArtifactCharacterLimit: outbound?.viewArtifactCharacterLimit,
+                  })
+                : [];
+        const localAgents = outbound?.localAgents ?? {};
+        if (Object.keys(localAgents).length > 0) {
+            registerCompatTool(api, (ctx: A2ALocalToolContext) => {
+                const localAgentId = ctx.agentId;
+                if (!localAgentId) return [];
+                const localOutbound = localAgents[localAgentId];
+                if (!localOutbound?.agents) return [];
+                return createToolsForAgents(localOutbound.agents, localAgentId, ctx);
+            }, { names: A2A_OUTBOUND_TOOL_NAMES });
+            if (api.registrationMode === "full") {
+                api.logger.info(
+                    `[a2a] Registered caller-aware outbound tools for ${Object.keys(localAgents).length} local agent(s)`,
+                );
             }
-            api.logger.info(
-                `[a2a] Registered ${tools.length} outbound tools for ${Object.keys(outbound.agents).length} agent(s)`,
-            );
+        } else if (outbound?.agents && Object.keys(outbound.agents).length > 0) {
+            const tools = createToolsForAgents(outbound.agents);
+            for (const tool of tools) {
+                registerCompatTool(api, tool);
+            }
+            if (api.registrationMode === "full") {
+                api.logger.info(
+                    `[a2a] Registered ${tools.length} outbound tools for ${Object.keys(outbound.agents).length} agent(s)`,
+                );
+            }
+        }
+
+        if (api.registrationMode !== "full") {
+            registerCli(api, pluginConfig);
+            return;
         }
 
         // --- Inbound server ---
@@ -358,7 +405,12 @@ const a2aPlugin = definePluginEntry({
                     auth: "plugin",
                     handler: async (req, res) => {
                         if (!handlers) await initAgent(resolveRequestPublicUrl(req));
-                        if (handlers) await (handlers as A2AHttpHandlers).handleJsonRpc(req, res);
+                        if (!handlers) return;
+                        if (req.method === "GET" || req.method === "HEAD") {
+                            await (handlers as A2AHttpHandlers).handleAgentCard(req, res);
+                        } else {
+                            await (handlers as A2AHttpHandlers).handleJsonRpc(req, res);
+                        }
                     },
                 });
             }
@@ -461,7 +513,8 @@ const a2aPlugin = definePluginEntry({
                 (pluginConfig.inbound?.apiKeys && pluginConfig.inbound.apiKeys.length > 0);
 
             if (inboundConfigured) {
-                api.registerTool(
+                registerCompatTool(
+                    api,
                     createUpdateAgentCardTool({
                         loadConfig: async () =>
                             api.runtime.config.loadConfig() as Record<string, unknown>,
