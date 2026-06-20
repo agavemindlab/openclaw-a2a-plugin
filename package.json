@@ -67,7 +67,7 @@
         "@biomejs/biome": "^1.9.0",
         "@types/bun": "latest",
         "@types/ws": "^8.0.0",
-        "openclaw": "2026.5.4",
+        "openclaw": "2026.5.26",
         "typescript": "^5.7.0"
     },
     "trustedDependencies": [
