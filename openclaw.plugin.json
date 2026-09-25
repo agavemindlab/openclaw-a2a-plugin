@@ -42,9 +42,7 @@
                         "type": "object",
                         "additionalProperties": {
                             "type": "object",
-                            "required": [
-                                "url"
-                            ],
+                            "required": ["url"],
                             "additionalProperties": false,
                             "properties": {
                                 "url": {
@@ -96,9 +94,7 @@
                                     "type": "object",
                                     "additionalProperties": {
                                         "type": "object",
-                                        "required": [
-                                            "url"
-                                        ],
+                                        "required": ["url"],
                                         "additionalProperties": false,
                                         "properties": {
                                             "url": {
@@ -136,11 +132,7 @@
                                 "type": "array",
                                 "items": {
                                     "type": "object",
-                                    "required": [
-                                        "id",
-                                        "name",
-                                        "description"
-                                    ],
+                                    "required": ["id", "name", "description"],
                                     "additionalProperties": false,
                                     "properties": {
                                         "id": {
@@ -188,10 +180,7 @@
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "required": [
-                                "label",
-                                "key"
-                            ],
+                            "required": ["label", "key"],
                             "additionalProperties": false,
                             "properties": {
                                 "label": {
@@ -207,9 +196,7 @@
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "required": [
-                                "agentId"
-                            ],
+                            "required": ["agentId"],
                             "additionalProperties": false,
                             "properties": {
                                 "agentId": {
@@ -229,11 +216,7 @@
                                             "type": "array",
                                             "items": {
                                                 "type": "object",
-                                                "required": [
-                                                    "id",
-                                                    "name",
-                                                    "description"
-                                                ],
+                                                "required": ["id", "name", "description"],
                                                 "additionalProperties": false,
                                                 "properties": {
                                                     "id": {
@@ -278,10 +261,7 @@
                                     "type": "array",
                                     "items": {
                                         "type": "object",
-                                        "required": [
-                                            "label",
-                                            "key"
-                                        ],
+                                        "required": ["label", "key"],
                                         "additionalProperties": false,
                                         "properties": {
                                             "label": {

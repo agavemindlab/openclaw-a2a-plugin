@@ -65,12 +65,16 @@ function makeRuntime(options?: {
         async (params: Record<string, unknown>) => {
             if (options?.onDispatch) {
                 await options.onDispatch(params);
-                return;
+            } else {
+                const dispatcherOptions = params.dispatcherOptions as {
+                    deliver?: (payload: { text?: string }, info: { kind: string }) => Promise<void>;
+                };
+                await dispatcherOptions.deliver?.({ text: "Hello back!" }, { kind: "final" });
             }
-            const dispatcherOptions = params.dispatcherOptions as {
-                deliver?: (payload: { text?: string }) => Promise<void>;
+            return {
+                queuedFinal: true,
+                counts: { block: 0, final: 1, tool: 0 },
             };
-            await dispatcherOptions.deliver?.({ text: "Hello back!" });
         },
     );
 
@@ -400,9 +404,9 @@ describe("OpenClawExecutor", () => {
                     | undefined;
                 capturedSignal = replyOptions?.abortSignal;
                 const dispatcherOptions = params.dispatcherOptions as {
-                    deliver?: (payload: { text?: string }) => Promise<void>;
+                    deliver?: (payload: { text?: string }, info: { kind: string }) => Promise<void>;
                 };
-                await dispatcherOptions.deliver?.({ text: "ok" });
+                await dispatcherOptions.deliver?.({ text: "ok" }, { kind: "final" });
             },
         });
         const executor = new OpenClawExecutor({
@@ -511,16 +515,22 @@ describe("OpenClawExecutor", () => {
         const runtime = makeRuntime({
             onDispatch: async (params) => {
                 const dispatcherOptions = params.dispatcherOptions as {
-                    deliver?: (payload: {
-                        text?: string;
-                        mediaUrls?: string[];
-                        mediaUrl?: string;
-                    }) => Promise<void>;
+                    deliver?: (
+                        payload: {
+                            text?: string;
+                            mediaUrls?: string[];
+                            mediaUrl?: string;
+                        },
+                        info: { kind: string },
+                    ) => Promise<void>;
                 };
-                await dispatcherOptions.deliver?.({
-                    text: "Here are files",
-                    mediaUrls: ["https://example.com/one.png", "https://example.com/two.png"],
-                });
+                await dispatcherOptions.deliver?.(
+                    {
+                        text: "Here are files",
+                        mediaUrls: ["https://example.com/one.png", "https://example.com/two.png"],
+                    },
+                    { kind: "final" },
+                );
             },
         });
         const executor = new OpenClawExecutor({
@@ -549,16 +559,22 @@ describe("OpenClawExecutor", () => {
         const runtime = makeRuntime({
             onDispatch: async (params) => {
                 const dispatcherOptions = params.dispatcherOptions as {
-                    deliver?: (payload: {
-                        text?: string;
-                        mediaUrls?: string[];
-                        mediaUrl?: string;
-                    }) => Promise<void>;
+                    deliver?: (
+                        payload: {
+                            text?: string;
+                            mediaUrls?: string[];
+                            mediaUrl?: string;
+                        },
+                        info: { kind: string },
+                    ) => Promise<void>;
                 };
-                await dispatcherOptions.deliver?.({
-                    text: "Single legacy media",
-                    mediaUrl: "https://example.com/legacy.png",
-                });
+                await dispatcherOptions.deliver?.(
+                    {
+                        text: "Single legacy media",
+                        mediaUrl: "https://example.com/legacy.png",
+                    },
+                    { kind: "final" },
+                );
             },
         });
         const executor = new OpenClawExecutor({
@@ -585,16 +601,22 @@ describe("OpenClawExecutor", () => {
         const runtime = makeRuntime({
             onDispatch: async (params) => {
                 const dispatcherOptions = params.dispatcherOptions as {
-                    deliver?: (payload: {
-                        text?: string;
-                        mediaUrls?: string[];
-                        mediaUrl?: string;
-                    }) => Promise<void>;
+                    deliver?: (
+                        payload: {
+                            text?: string;
+                            mediaUrls?: string[];
+                            mediaUrl?: string;
+                        },
+                        info: { kind: string },
+                    ) => Promise<void>;
                 };
-                await dispatcherOptions.deliver?.({
-                    mediaUrls: ["https://example.com/preferred.png"],
-                    mediaUrl: "https://example.com/preferred.png",
-                });
+                await dispatcherOptions.deliver?.(
+                    {
+                        mediaUrls: ["https://example.com/preferred.png"],
+                        mediaUrl: "https://example.com/preferred.png",
+                    },
+                    { kind: "final" },
+                );
             },
         });
         const executor = new OpenClawExecutor({

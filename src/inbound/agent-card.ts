@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 import type { A2AAgentCardConfig, A2APluginConfig, A2ASkillConfig } from "../config.js";
 

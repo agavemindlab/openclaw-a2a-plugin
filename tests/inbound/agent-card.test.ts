@@ -88,7 +88,9 @@ describe("AgentCardBuilder", () => {
     test("agentCardOverride takes priority over pluginConfig.inbound.agentCard", () => {
         const card = new AgentCardBuilder({
             ...baseParams,
-            pluginConfig: { inbound: { agentCard: { name: "Global Name", description: "Global desc" } } },
+            pluginConfig: {
+                inbound: { agentCard: { name: "Global Name", description: "Global desc" } },
+            },
             agentCardOverride: { name: "Override Name", description: "Override desc" },
         }).build();
         expect(card.name).toBe("Override Name");
