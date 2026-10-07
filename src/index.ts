@@ -7,8 +7,7 @@ export const VERSION = "0.1.3"; // x-release-please-version
 import type { AgentCard } from "@a2a-js/sdk";
 import { DefaultRequestHandler } from "@a2a-js/sdk/server";
 import { JSONTaskStore, LocalFileStore } from "@a2anet/a2a-utils";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { type OpenClawPluginApi, definePluginEntry } from "openclaw/plugin-sdk/core";
 
 import {
     type A2AAgentCardConfig,
@@ -94,26 +93,31 @@ function registerCli(api: OpenClawPluginApi, pluginConfig: A2APluginConfig): voi
                         const keyLabel = assertValidA2AInboundKeyLabel(
                             label?.trim() || `key-${Date.now()}`,
                         );
-                        const currentConfig = api.runtime.config.loadConfig() as Record<
-                            string,
-                            unknown
-                        >;
-                        const { a2aConfig } = extractA2AEntry(currentConfig);
-                        const existingInbound = parseA2APluginConfig(a2aConfig).inbound ?? {};
-                        const existingKeys = existingInbound.apiKeys ?? [];
-                        assertUniqueA2AInboundKeyLabels([
-                            ...existingKeys,
-                            { label: keyLabel, key },
-                        ]);
-
-                        await api.runtime.config.writeConfigFile(
-                            buildRootConfigWithA2A(currentConfig, {
-                                inbound: {
-                                    ...existingInbound,
-                                    apiKeys: [...existingKeys, { label: keyLabel, key }],
-                                },
-                            }) as import("openclaw/plugin-sdk").OpenClawConfig,
-                        );
+                        await api.runtime.config.mutateConfigFile({
+                            base: "source",
+                            afterWrite: {
+                                mode: "none",
+                                reason: "The A2A CLI reports the required gateway restart.",
+                            },
+                            mutate(draft) {
+                                const currentConfig = draft as unknown as Record<string, unknown>;
+                                const { a2aConfig } = extractA2AEntry(currentConfig);
+                                const existingInbound =
+                                    parseA2APluginConfig(a2aConfig).inbound ?? {};
+                                const existingKeys = existingInbound.apiKeys ?? [];
+                                assertUniqueA2AInboundKeyLabels([
+                                    ...existingKeys,
+                                    { label: keyLabel, key },
+                                ]);
+                                const nextConfig = buildRootConfigWithA2A(currentConfig, {
+                                    inbound: {
+                                        ...existingInbound,
+                                        apiKeys: [...existingKeys, { label: keyLabel, key }],
+                                    },
+                                }) as import("openclaw/plugin-sdk/core").OpenClawConfig;
+                                draft.plugins = nextConfig.plugins;
+                            },
+                        });
                         console.log(
                             `Generated API key "${keyLabel}": ${key}\n\nRestart the gateway to apply.`,
                         );
@@ -129,7 +133,7 @@ function registerCli(api: OpenClawPluginApi, pluginConfig: A2APluginConfig): voi
                 .description("List configured inbound A2A API keys")
                 .action(() => {
                     try {
-                        const currentConfig = api.runtime.config.loadConfig() as Record<
+                        const currentConfig = api.runtime.config.current() as unknown as Record<
                             string,
                             unknown
                         >;
@@ -157,38 +161,43 @@ function registerCli(api: OpenClawPluginApi, pluginConfig: A2APluginConfig): voi
                 .action(async (label: string) => {
                     try {
                         const targetLabel = label.trim().toLowerCase();
-                        const currentConfig = api.runtime.config.loadConfig() as Record<
-                            string,
-                            unknown
-                        >;
-                        const { a2aConfig } = extractA2AEntry(currentConfig);
-                        const existingInbound = (a2aConfig.inbound ?? {}) as Record<
-                            string,
-                            unknown
-                        >;
-                        const existingKeys = Array.isArray(existingInbound.apiKeys)
-                            ? existingInbound.apiKeys
-                            : [];
-
-                        const filtered = existingKeys.filter(
-                            (k: Record<string, unknown>) =>
-                                typeof k.label !== "string" ||
-                                k.label.trim().toLowerCase() !== targetLabel,
-                        );
-                        if (filtered.length === existingKeys.length) {
+                        const result = await api.runtime.config.mutateConfigFile({
+                            base: "source",
+                            afterWrite: {
+                                mode: "none",
+                                reason: "The A2A CLI reports the required gateway restart.",
+                            },
+                            mutate(draft) {
+                                const currentConfig = draft as unknown as Record<string, unknown>;
+                                const { a2aConfig } = extractA2AEntry(currentConfig);
+                                const existingInbound = (a2aConfig.inbound ?? {}) as Record<
+                                    string,
+                                    unknown
+                                >;
+                                const existingKeys = Array.isArray(existingInbound.apiKeys)
+                                    ? existingInbound.apiKeys
+                                    : [];
+                                const filtered = existingKeys.filter(
+                                    (k: Record<string, unknown>) =>
+                                        typeof k.label !== "string" ||
+                                        k.label.trim().toLowerCase() !== targetLabel,
+                                );
+                                if (filtered.length === existingKeys.length) return false;
+                                const nextConfig = buildRootConfigWithA2A(currentConfig, {
+                                    inbound: {
+                                        ...existingInbound,
+                                        apiKeys: filtered.length > 0 ? filtered : undefined,
+                                    },
+                                }) as import("openclaw/plugin-sdk/core").OpenClawConfig;
+                                draft.plugins = nextConfig.plugins;
+                                return true;
+                            },
+                        });
+                        if (!result.result) {
                             console.log(`No key found with label "${label}".`);
                             process.exitCode = 1;
                             return;
                         }
-
-                        await api.runtime.config.writeConfigFile(
-                            buildRootConfigWithA2A(currentConfig, {
-                                inbound: {
-                                    ...existingInbound,
-                                    apiKeys: filtered.length > 0 ? filtered : undefined,
-                                },
-                            }) as import("openclaw/plugin-sdk").OpenClawConfig,
-                        );
                         console.log(`Revoked key "${label}". Restart the gateway to apply.`);
                     } catch (err) {
                         console.error(
@@ -224,7 +233,13 @@ const a2aPlugin = definePluginEntry({
     register(api: OpenClawPluginApi) {
         const pluginConfig = parseA2APluginConfig(api.pluginConfig);
 
-        const stateDir = (() => { try { return api.runtime.state.resolveStateDir(); } catch { return undefined; } })();
+        const stateDir = (() => {
+            try {
+                return api.runtime.state.resolveStateDir();
+            } catch {
+                return undefined;
+            }
+        })();
         const workspaceDir = api.config.agents?.defaults?.workspace ?? process.cwd();
 
         // --- Outbound tools (via @a2anet/a2a-utils) ---
@@ -238,7 +253,9 @@ const a2aPlugin = definePluginEntry({
             agents && Object.keys(agents).length > 0
                 ? createOutboundTools({
                       agents,
-                      stateDir: localAgentId ? `${stateDir ?? workspaceDir}/a2a/local/${localAgentId}` : (stateDir ?? workspaceDir),
+                      stateDir: localAgentId
+                          ? `${stateDir ?? workspaceDir}/a2a/local/${localAgentId}`
+                          : (stateDir ?? workspaceDir),
                       workspaceDir: toolContext?.workspaceDir ?? workspaceDir,
                       taskStore: outbound?.taskStore,
                       fileStore: outbound?.fileStore,
@@ -253,13 +270,17 @@ const a2aPlugin = definePluginEntry({
                 : [];
         const localAgents = outbound?.localAgents ?? {};
         if (Object.keys(localAgents).length > 0) {
-            registerCompatTool(api, (ctx: A2ALocalToolContext) => {
-                const localAgentId = ctx.agentId;
-                if (!localAgentId) return [];
-                const localOutbound = localAgents[localAgentId];
-                if (!localOutbound?.agents) return [];
-                return createToolsForAgents(localOutbound.agents, localAgentId, ctx);
-            }, { names: A2A_OUTBOUND_TOOL_NAMES });
+            registerCompatTool(
+                api,
+                (ctx: A2ALocalToolContext) => {
+                    const localAgentId = ctx.agentId;
+                    if (!localAgentId) return [];
+                    const localOutbound = localAgents[localAgentId];
+                    if (!localOutbound?.agents) return [];
+                    return createToolsForAgents(localOutbound.agents, localAgentId, ctx);
+                },
+                { names: A2A_OUTBOUND_TOOL_NAMES },
+            );
             if (api.registrationMode === "full") {
                 api.logger.info(
                     `[a2a] Registered caller-aware outbound tools for ${Object.keys(localAgents).length} local agent(s)`,
@@ -341,9 +362,7 @@ const a2aPlugin = definePluginEntry({
                                 agentCardOverride: entry.agentCard,
                                 a2aPath: `/a2a/${agentId}`,
                             }).build();
-                            const taskStore = new JSONTaskStore(
-                                `${stateDir}/a2a/${agentId}/tasks`,
-                            );
+                            const taskStore = new JSONTaskStore(`${stateDir}/a2a/${agentId}/tasks`);
                             const fileStore = new LocalFileStore(
                                 `${workspaceDir}/a2a/${agentId}/files`,
                             );
@@ -425,7 +444,9 @@ const a2aPlugin = definePluginEntry({
 
             api.registerService({
                 id: "a2a",
-                start: async () => { api.logger.info("[a2a] A2A service started"); },
+                start: async () => {
+                    api.logger.info("[a2a] A2A service started");
+                },
                 stop: async () => {
                     api.logger.info("[a2a] A2A service stopped");
                     for (const cb of stopCallbacks) cb();
@@ -516,12 +537,19 @@ const a2aPlugin = definePluginEntry({
                 registerCompatTool(
                     api,
                     createUpdateAgentCardTool({
-                        loadConfig: async () =>
-                            api.runtime.config.loadConfig() as Record<string, unknown>,
-                        writeConfigFile: (cfg) =>
-                            api.runtime.config.writeConfigFile(
-                                cfg as import("openclaw/plugin-sdk").OpenClawConfig,
-                            ),
+                        mutateConfig: async (update) => {
+                            await api.runtime.config.mutateConfigFile({
+                                base: "source",
+                                afterWrite: { mode: "auto" },
+                                mutate(draft) {
+                                    const nextConfig = buildRootConfigWithA2A(
+                                        draft as unknown as Record<string, unknown>,
+                                        update,
+                                    ) as import("openclaw/plugin-sdk/core").OpenClawConfig;
+                                    draft.plugins = nextConfig.plugins;
+                                },
+                            });
+                        },
                         updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => {
                             if (!agentCard) return;
                             livePluginConfig = {
@@ -552,7 +580,9 @@ const a2aPlugin = definePluginEntry({
 
             api.registerService({
                 id: "a2a",
-                start: async () => { api.logger.info("[a2a] A2A service started"); },
+                start: async () => {
+                    api.logger.info("[a2a] A2A service started");
+                },
                 stop: async () => {
                     api.logger.info("[a2a] A2A service stopped");
                     agentCard = null;

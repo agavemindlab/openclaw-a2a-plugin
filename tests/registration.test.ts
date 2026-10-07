@@ -83,8 +83,8 @@ function createApi(options?: {
                               resolveStateDir: () => "/tmp",
                           },
                           config: {
-                              loadConfig: () => ({}),
-                              writeConfigFile: async () => {},
+                              current: () => ({}),
+                              mutateConfigFile: async () => ({ result: undefined }),
                           },
                       }
                     : ({} as Record<string, never>),
@@ -197,17 +197,7 @@ describe("plugin registration", () => {
     });
 
     test("revoke-key matches labels case-insensitively", async () => {
-        const writeConfigFile = mock(async () => {});
-        const { api, cliRegistrations } = createApi({
-            config: {
-                agents: {
-                    defaults: {
-                        workspace: "/tmp",
-                    },
-                },
-            },
-        });
-        api.runtime.config.loadConfig = () => ({
+        const storedConfig = {
             plugins: {
                 entries: {
                     a2a: {
@@ -222,8 +212,22 @@ describe("plugin registration", () => {
                     },
                 },
             },
+        };
+        const mutateConfigFile = mock(
+            async ({ mutate }: { mutate: (draft: typeof storedConfig) => boolean }) => ({
+                result: mutate(storedConfig),
+            }),
+        );
+        const { api, cliRegistrations } = createApi({
+            config: {
+                agents: {
+                    defaults: {
+                        workspace: "/tmp",
+                    },
+                },
+            },
         });
-        api.runtime.config.writeConfigFile = writeConfigFile;
+        api.runtime.config.mutateConfigFile = mutateConfigFile;
 
         plugin.register(api as never);
 
@@ -239,8 +243,14 @@ describe("plugin registration", () => {
             consoleLogSpy.mockRestore();
         }
 
-        expect(writeConfigFile).toHaveBeenCalledTimes(1);
-        expect(writeConfigFile.mock.calls[0]?.[0]).toEqual({
+        expect(mutateConfigFile).toHaveBeenCalledTimes(1);
+        // Catches: revoke-key mutating the merged runtime view or triggering an
+        // implicit reload instead of preserving source includes and its explicit restart contract.
+        expect(mutateConfigFile.mock.calls[0]?.[0]).toMatchObject({
+            base: "source",
+            afterWrite: { mode: "none" },
+        });
+        expect(storedConfig).toEqual({
             plugins: {
                 entries: {
                     a2a: {
@@ -347,7 +357,7 @@ describe("OpenClaw registration mode compatibility", () => {
         expect(tools).toHaveLength(0);
     });
 
-    test("cli-metadata mode with outbound config does not register tools", () => {
+    test("cli-metadata mode exposes outbound tool metadata", () => {
         const { api, tools, cliRegistrations } = createApi({
             registrationMode: "cli-metadata",
             pluginConfig: {
@@ -363,7 +373,7 @@ describe("OpenClaw registration mode compatibility", () => {
 
         plugin.register(api as never);
 
-        expect(tools).toHaveLength(0);
+        expect(tools).toHaveLength(6);
         expect(cliRegistrations).toHaveLength(1);
     });
 

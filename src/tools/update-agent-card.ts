@@ -5,12 +5,10 @@
 import { Type } from "@sinclair/typebox";
 
 import type { A2AAgentCardConfig } from "../config.js";
-import { buildRootConfigWithA2A } from "../config.js";
 import { type AgentTool, jsonResult } from "../types.js";
 
 export type UpdateAgentCardDeps = {
-    loadConfig: () => Promise<Record<string, unknown>>;
-    writeConfigFile: (config: Record<string, unknown>) => Promise<void>;
+    mutateConfig: (update: Record<string, unknown>) => Promise<void>;
     /** Called after config is written to update the in-memory agent card. */
     updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => void;
 };
@@ -74,12 +72,7 @@ export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool 
 
             try {
                 // Persist to config file under inbound.agentCard
-                const currentConfig = await deps.loadConfig();
-                await deps.writeConfigFile(
-                    buildRootConfigWithA2A(currentConfig, {
-                        inbound: { agentCard: patch },
-                    }),
-                );
+                await deps.mutateConfig({ inbound: { agentCard: patch } });
 
                 // Update in-memory card
                 deps.updateLiveCard(patch);

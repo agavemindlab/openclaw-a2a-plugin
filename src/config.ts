@@ -151,9 +151,7 @@ function parseAgents(value: unknown): Record<string, A2AAgentEntry> | undefined 
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function parseLocalAgents(
-    value: unknown,
-): Record<string, A2ALocalAgentOutboundConfig> | undefined {
+function parseLocalAgents(value: unknown): Record<string, A2ALocalAgentOutboundConfig> | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
     }
